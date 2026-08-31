@@ -140,12 +140,66 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 
 ---
 
-## 🧪 Running Automated Tests
+## 🧪 Reproducible Testing & Evaluation Guide
 
-Run backend unit tests verifying all 4 autonomous routing branches and incident matching logic:
+Judges and evaluators can reproduce and verify all 4 autonomous routing branches and AI reasoning pathways using both automated test suites and the interactive web interface.
+
+### 1. Automated Test Suite (Pytest)
+
+Run the automated test suite covering all 4 decision branches, heuristic boundary conditions, and memory bank aggregations:
 
 ```bash
-.venv\Scripts\pytest.exe backend/tests -v
+# Activate virtual environment
+.venv\Scripts\activate   # On Linux/Mac: source .venv/bin/activate
+
+# Execute the 6 automated unit tests
+pytest backend/tests -v
+```
+
+**Expected Output**:
+```text
+backend/tests/test_router.py::test_seed_incidents_loaded PASSED          [ 16%]
+backend/tests/test_router.py::test_scenario_1_redis_auto_resolve_branch_a PASSED [ 33%]
+backend/tests/test_router.py::test_scenario_2_db_lag_critical_branch_b PASSED [ 50%]
+backend/tests/test_router.py::test_scenario_3_novel_anomaly_branch_c PASSED [ 66%]
+backend/tests/test_router.py::test_scenario_4_transient_noise_branch_d PASSED [ 83%]
+backend/tests/test_router.py::test_stats_aggregation PASSED              [100%]
+
+============================== 6 passed in 0.22s ==============================
+```
+
+---
+
+### 2. Interactive Reproduction Steps (Web Dashboard)
+
+1. Open the **[Live Command Center](https://muscle-memory-saadi2004.vercel.app)**.
+2. **Test Branch A (Auto-Healing)**: Click **"Scenario 1: Redis Connection Pool Exhaustion"**.
+   - *Verification*: Look for the green `Branch A (Auto-Healing)` badge, the 4-step reasoning trace, the auto-executed `kubectl` command, and celebratory confetti.
+3. **Test Branch B (Critical Escalation)**: Click **"Scenario 2: PostgreSQL Replica Lag Surge"**.
+   - *Verification*: Look for the red `Branch B (High-Sev Escalation)` badge, `P0` severity flag, and the pre-packaged SQL kill command. Click **"💬 View Slack Alert"** to inspect the on-call notification.
+4. **Test Branch C (Honest Uncertainty)**: Click **"Scenario 3: Novel Auth Memory Leak"**.
+   - *Verification*: Look for the amber `Branch C` badge, confirming the agent avoids hallucinating fixes on novel anomalies and produces a diagnostic checklist.
+5. **Test Branch D (Noise Suppression)**: Click **"Scenario 4: Transient CPU Spike"**.
+   - *Verification*: Look for the gray `Branch D` badge confirming transient blip suppression.
+6. **Test Continuous Learning**: Switch to the **Memory Bank** tab, search runbooks, or click **"Teach Muscle Memory"** to register a new incident.
+
+---
+
+### 3. API Webhook Reproduction (cURL)
+
+You can also send custom alerts directly via HTTP POST:
+
+```bash
+curl -X POST "https://muscle-memory-saadi2004.vercel.app/api/alerts/custom" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "service": "cache-redis-cluster",
+    "environment": "production",
+    "title": "Redis Connection Pool Exhaustion on Cache Node",
+    "error_message": "ERR max number of clients reached (10000/10000). JedisConnectionException: Could not get a resource from the pool",
+    "source": "datadog-webhook",
+    "region": "us-central1-a"
+  }'
 ```
 
 ---
