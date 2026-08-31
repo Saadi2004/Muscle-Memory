@@ -1,0 +1,157 @@
+[
+  {
+    "id": "INC-2025-014",
+    "title": "Redis Connection Pool Exhaustion on Cache Node",
+    "service": "cache-redis-cluster",
+    "category": "cache",
+    "severity": "P2",
+    "symptoms": [
+      "ERR max number of clients reached",
+      "RedisConnectionException: Timeout awaiting response (out of connections)",
+      "Cache miss rate spiked by 80%",
+      "API p99 latency increased from 45ms to 850ms"
+    ],
+    "error_patterns": [
+      "ERR max number of clients reached",
+      "JedisConnectionException: Could not get a resource from the pool",
+      "ConnectionPoolTimeoutException"
+    ],
+    "root_cause": "A background reporting cron job opened 500 unclosed redis connections during scheduled report generation, hitting the redis maxclients 10,000 threshold.",
+    "runbook": {
+      "summary": "Execute automated stale connection reaper script and restart the redis-proxy connection pooler.",
+      "action_type": "auto_script",
+      "remediation_command": "kubectl exec -n prod cache-redis-0 -- redis-cli CLIENT KILL TYPE normal IDLE 120 && kubectl rollout restart deployment/redis-proxy -n prod",
+      "runbook_url": "https://wiki.internal.net/runbooks/redis-pool-exhaustion",
+      "estimated_recovery_time_sec": 45,
+      "automated_safe": true
+    },
+    "occurred_at": "2025-11-14T08:22:00Z",
+    "resolved_by": "Muscle Memory Auto-Remediator",
+    "post_mortem_notes": "Added automated idle client eviction policy and scaled redis-proxy poolers.",
+    "tags": ["redis", "cache", "connection_pool", "p99_latency", "timeout"]
+  },
+  {
+    "id": "INC-2025-089",
+    "title": "PostgreSQL Read Replica Replication Lag Exceeding SLA",
+    "service": "primary-db-cluster",
+    "category": "database",
+    "severity": "P0",
+    "symptoms": [
+      "pg_stat_replication lag > 120s",
+      "Read queries serving stale data on checkout service",
+      "Disk I/O saturation on replica node db-replica-02",
+      "WAL receiver process blocked on lock"
+    ],
+    "error_patterns": [
+      "canceling statement due to conflict with recovery",
+      "replication lag critical threshold exceeded: 180s",
+      "FATAL: terminating connection due to administrator command"
+    ],
+    "root_cause": "Long-running analytical query held an exclusive table lock on the replica, stalling the WAL replay worker and causing replication lag to spiral past the 120-second safety cutoff.",
+    "runbook": {
+      "summary": "Terminate blocking analytical query pid, verify WAL receiver replay resumes, or failover read routing to replica-03.",
+      "action_type": "runbook_command",
+      "remediation_command": "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state != 'idle' AND query ILIKE '%analytics_dump%' AND age(clock_timestamp(), query_start) > interval '5 minutes';",
+      "runbook_url": "https://wiki.internal.net/runbooks/db-replica-lag-failover",
+      "estimated_recovery_time_sec": 120,
+      "automated_safe": false
+    },
+    "occurred_at": "2025-12-01T14:15:30Z",
+    "resolved_by": "Lead Database SRE (Escalated)",
+    "post_mortem_notes": "Configured max_standby_streaming_delay to 30s to automatically cancel conflicting queries on replicas.",
+    "tags": ["postgresql", "replication_lag", "database", "wal_replay", "lock_conflict", "checkout"]
+  },
+  {
+    "id": "INC-2025-112",
+    "title": "Payment Gateway Webhook Secret Signature Mismatch",
+    "service": "payment-service",
+    "category": "third_party_api",
+    "severity": "P2",
+    "symptoms": [
+      "HTTP 400 Bad Request on /api/v1/webhooks/stripe",
+      "Invalid signature error in payment callback handler",
+      "Pending order status stuck in PROCESSING",
+      "Error count > 250 req/min on payment webhook ingress"
+    ],
+    "error_patterns": [
+      "SignatureVerificationException: No signatures found matching expected signature for payload",
+      "Webhook signature validation failed",
+      "HTTP 400: Invalid Stripe-Signature header"
+    ],
+    "root_cause": "Third-party payment provider rolled their webhook signing secret ahead of schedule, causing incoming valid webhooks to fail signature validation against stale secret in payment-service cache.",
+    "runbook": {
+      "summary": "Sync latest webhook secret from Google Secret Manager and hot-reload payment-service config.",
+      "action_type": "auto_script",
+      "remediation_command": "gcloud secrets versions access latest --secret=stripe-webhook-secret | kubectl create secret generic payment-webhook-sec --from-file=secret=/dev/stdin --dry-run=client -o yaml | kubectl apply -f - && kubectl rollout restart deployment/payment-service",
+      "runbook_url": "https://wiki.internal.net/runbooks/payment-webhook-rotation",
+      "estimated_recovery_time_sec": 60,
+      "automated_safe": true
+    },
+    "occurred_at": "2026-01-10T19:40:12Z",
+    "resolved_by": "Muscle Memory Auto-Remediator",
+    "post_mortem_notes": "Implemented automatic dual-key validation window during secret rotation cycles.",
+    "tags": ["stripe", "payment", "webhook", "signature_verification", "secret_manager"]
+  },
+  {
+    "id": "INC-2025-201",
+    "title": "Memory Leak via Unbounded S3/GCS Object Streaming Buffer",
+    "service": "document-processor",
+    "category": "resource_exhaustion",
+    "severity": "P2",
+    "symptoms": [
+      "Kubernetes Pod OOMKilled (exit code 137)",
+      "Heap memory usage linear climb to 100%",
+      "Garbage collection pause time > 15 seconds",
+      "Document export queue backlog growing by 500 items/min"
+    ],
+    "error_patterns": [
+      "java.lang.OutOfMemoryError: Java heap space",
+      "Container document-processor terminated with OOMKilled",
+      "Stream buffer exceeded max capacity"
+    ],
+    "root_cause": "A new batch export endpoint loaded entire 2GB PDF attachments into byte arrays in-memory instead of streaming via ChunkedTransfer, rapidly exhausting JVM heap.",
+    "runbook": {
+      "summary": "Restart document-processor pods with chunked stream flag enabled and scale deployment replicas from 3 to 6.",
+      "action_type": "auto_script",
+      "remediation_command": "kubectl scale deployment/document-processor --replicas=6 -n prod && kubectl set env deployment/document-processor USE_CHUNKED_STREAMING=true -n prod",
+      "runbook_url": "https://wiki.internal.net/runbooks/document-processor-oom",
+      "estimated_recovery_time_sec": 90,
+      "automated_safe": true
+    },
+    "occurred_at": "2026-01-28T11:05:00Z",
+    "resolved_by": "Muscle Memory Auto-Remediator",
+    "post_mortem_notes": "Merged PR to strictly enforce streaming response bodies for all files > 5MB.",
+    "tags": ["oomkilled", "memory_leak", "streaming", "jvm", "kubernetes", "document_processor"]
+  },
+  {
+    "id": "INC-2025-305",
+    "title": "CoreDNS Socket Saturation on Ingress Gateway Node",
+    "service": "ingress-gateway",
+    "category": "network_infra",
+    "severity": "P1",
+    "symptoms": [
+      "i/o timeout on dial tcp: lookup auth.internal on 10.96.0.10:53: read udp: i/o timeout",
+      "504 Gateway Timeout on 30% of incoming edge traffic",
+      "CoreDNS query drop rate > 25%",
+      "conntrack table size exceeded threshold on worker nodes"
+    ],
+    "error_patterns": [
+      "dial tcp: lookup auth.internal: read udp: i/o timeout",
+      "net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)",
+      "DNS query failed: servfail"
+    ],
+    "root_cause": "UDP packet loss in CoreDNS due to linux kernel conntrack table saturation caused by unpooled microservice HTTP client requests.",
+    "runbook": {
+      "summary": "Deploy NodeLocal DNSCache daemonset and scale CoreDNS replicas to 10 pods.",
+      "action_type": "runbook_command",
+      "remediation_command": "kubectl scale deployment/coredns -n kube-system --replicas=10 && sysctl -w net.netfilter.nf_conntrack_max=1048576",
+      "runbook_url": "https://wiki.internal.net/runbooks/dns-conntrack-saturation",
+      "estimated_recovery_time_sec": 180,
+      "automated_safe": false
+    },
+    "occurred_at": "2026-02-15T16:30:00Z",
+    "resolved_by": "Infrastructure Platform Team",
+    "post_mortem_notes": "Enabled NodeLocal DNSCache across all Kubernetes production node pools.",
+    "tags": ["dns", "coredns", "timeout", "conntrack", "ingress", "gateway"]
+  }
+]
